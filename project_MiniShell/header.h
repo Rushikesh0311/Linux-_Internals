@@ -11,7 +11,17 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
- 
+
+typedef struct
+{
+    int pid;
+    char cmd[100];
+} Job_cmd;
+
+// Job_cmd jobs[20];
+// int stopped = 0; //count of jobs
+extern char input_string[100];
+
 
 #define BUILTIN		1
 #define EXTERNAL	2
@@ -45,6 +55,16 @@ int internal_cmd(char *cmd);
 int external_cmd(char *cmd);
 
 void my_handler(int signum);
+
+void insert_first();
+void print_jobs();
+void delete_at_first();
+
+void sigchld_handler(int signum);
+
+void fg_command();
+void bg_command();
+
 
 
 

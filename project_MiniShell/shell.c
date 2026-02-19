@@ -5,26 +5,39 @@ char *external[153]; // Stores list of all external commands -->read from file
 int status;
 pid_t pid = 0;
 
+Job_cmd jobs[20];
+int stopped = 0; //count of jobs
+
+extern char input_string[100]; 
+
 void scan_input(char *prompt_string,char* input_string)
 {
-    extract_external_commands(external);
+    extract_external_commands(external);  // read external commands list from file
 
     // signal registers
     signal(SIGINT, my_handler);
     signal(SIGTSTP, my_handler);
+    signal(SIGCHLD, sigchld_handler);  // for bg
+
     while(1)
     {
-        write(1, "\n", 1); // avoids the prompt strings stack
+        pid = 0;
+       write(1, " ", 1); // avoids the prompt strings stack
         printf("%s ",prompt_string);
         fflush(stdout);
 
         //scanf("%[^\n]",input_string);
         //getchar();
 
-        if (fgets(input_string, 100, stdin) == NULL)
+        if (fgets(input_string, 100, stdin) == NULL) //reads whole line correctly
             continue;
 
-        input_string[strcspn(input_string, "\n")] = '\0';
+        input_string[strcspn(input_string, "\n")] = '\0'; // adjust newline
+
+        if(!strcmp(input_string,"exit"))
+        {
+            exit(0);
+        }
 
         //PS1 command
         if(!strncmp(input_string,"PS1=",4))
@@ -35,14 +48,15 @@ void scan_input(char *prompt_string,char* input_string)
             }
             else
             {
+                // copy new prompt afert the PS1
                 // if no changes --> prompt into new_prompt
                 strcpy(prompt_string,input_string+4);
             }
         }
         else
         {
-            char *get_cmd = get_command(input_string);
-            int type = check_command_type(get_cmd);
+            char *get_cmd = get_command(input_string); // get the first word
+            int type = check_command_type(get_cmd); // checks type
 
             // if(type == BUILTIN)
             //     return BUILTIN;
@@ -57,11 +71,17 @@ void scan_input(char *prompt_string,char* input_string)
             {
                 pid = fork();
                 if(pid == 0)
+                {
+                    // restore default signals
+                    signal(SIGINT, SIG_DFL);
+                    signal(SIGTSTP, SIG_DFL);
                     execute_external_commands(input_string);
+                }
                 else if(pid > 0){
+                    // wait till the child terminate
                     waitpid(pid,&status,WUNTRACED);
 
-                pid = 0; //reseting pi
+                pid = 0; //reseting pid for fg
                 }
             }
             else
@@ -197,6 +217,7 @@ void execute_internal_commands(char *input_string)
     else if(!strcmp(input_string,"exit"))
     {
         exit(0);
+       // kill(getpid(),SIGKILL);
     }
     else if(!strncmp(input_string,"echo",4))
     {
@@ -223,6 +244,25 @@ void execute_internal_commands(char *input_string)
             printf("%s\n",cmd);
         }
 
+        /* add new cmds-------------- > fg bg and jobs
+            jobs -> print current stopped process
+            fg   -> foreground
+            bg   -> background
+
+        */
+
+    }
+    else if(!strncmp(input_string,"jobs",4))
+    {
+        print_jobs();
+    }
+    else if(!strcmp(input_string,"fg"))
+    {
+        fg_command();
+    }
+    else if(!strcmp(input_string,"bg"))
+    {
+        bg_command();
     }
 
 }
@@ -348,11 +388,16 @@ void my_handler(int signum)
     {
         if(pid == 0)
         {
-            // printf("\n%s",prompt_string);
-            // fflush(stdout);
-            write(1, "\n", 1);
+            printf("\n%s ",prompt_string);
+            fflush(stdout);
+            //write(1, "\n", 1);
 
         }
+        // if(pid != 0)
+        // {
+        //     kill(pid,SIGINT);
+        // }
+        // write(1,"\n",1);
        
     }
 
@@ -360,13 +405,108 @@ void my_handler(int signum)
     {
         if(pid == 0)
         {
-            printf("\n%s",prompt_string);
+            printf("\n%s ",prompt_string);
             fflush(stdout);
            
         }
+        // if(pid != 0)
+        // {
+        //     kill(pid,SIGTSTP);
+        //     insert_first();
+        // }
+        // write(1,"\n",1);
         else
         {
-            //insert_first();
+            kill(pid,SIGTSTP);
+
+            insert_first();
+
+            printf("\nStopped : %s\n", input_string);
+            fflush(stdout);
         }
     }
+
+    if(signum == SIGCHLD)
+    {
+        waitpid(-1,&status,WNOHANG);
+    }
 }
+
+void  insert_first()
+{
+    // storing pid of stopped proccess
+    jobs[stopped].pid = pid;
+
+    // storing cmd string
+    strcpy(jobs[stopped].cmd,input_string);
+
+    stopped++; // + stop count
+}
+
+void delete_at_first()
+{
+    if(stopped == 0)
+        return;
+
+    for(int i=0;i<stopped-1; i++)
+    {
+        jobs[i] = jobs[i+1];
+    }
+
+    stopped--;
+}
+
+void sigchld_handler(int signum)
+{
+    // for bg --> cleans zombie
+    int child_pid;
+
+    while(child_pid = waitpid(-1,&status,WNOHANG) > 0);
+
+}
+
+void bg_command()
+{
+    if(stopped == 0)
+    {
+        printf("NO jobs\n");
+        return;
+    }
+    int fg_cmd = jobs[0].pid;
+    kill(fg_cmd,SIGCONT);
+    delete_at_first();
+
+}
+
+void fg_command(){
+
+    if(stopped == 0)
+    {
+        printf("NO Jobs\n");
+        return;
+    }
+
+    int fg_cmd = jobs[0].pid;
+    printf("%s\n",jobs[0].cmd);
+
+    kill(fg_cmd,SIGCONT);
+
+    waitpid(fg_cmd,&status,WUNTRACED);
+
+    delete_at_first();
+}
+
+void print_jobs()
+{
+    if(stopped == 0)
+    {
+        printf("No stopped jobs\n");
+        return;
+    }
+
+    for(int i = 0; i < stopped; i++)
+    {
+        printf("[%d] %d %s\n",i+1,jobs[i].pid,jobs[i].cmd);
+    }
+}
+

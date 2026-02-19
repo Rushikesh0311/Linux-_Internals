@@ -7,6 +7,6 @@ char *builtins[] = {
     "set", "unset", "export", "declare",
     "typeset", "readonly", "getopts", "source",
     "exit", "exec", "shopt", "caller", "true",
-    "type", "hash", "bind", "help",
+    "type", "hash", "bind", "help","fg","bg","jobs",
     NULL
 };
